@@ -22,11 +22,11 @@ import static net.tirasa.connid.bundles.ad.ADConnector.PRIMARYGROUPID;
 import static net.tirasa.connid.bundles.ad.ADConnector.SDDL_ATTR;
 import static net.tirasa.connid.bundles.ad.ADConnector.UACCONTROL_ATTR;
 import static net.tirasa.connid.bundles.ad.ADConnector.UF_ACCOUNTDISABLE;
+import static net.tirasa.connid.bundles.ad.ADConnector.ADDS2012_ATTRIBUTES_TO_BE_REMOVED;
 import static net.tirasa.connid.bundles.ldap.commons.LdapUtil.escapeAttrValue;
 import static org.identityconnectors.common.CollectionUtil.newCaseInsensitiveSet;
 import static org.identityconnectors.common.CollectionUtil.newSet;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
@@ -79,14 +79,73 @@ import org.identityconnectors.framework.common.objects.Uid;
 public class ADUtilities {
 
     private final static Log LOG = Log.getLog(ADUtilities.class);
-    
+
     private final ADConnection connection;
-    
+
     private final GroupHelper groupHelper;
 
     public ADUtilities(final ADConnection connection) {
         this.connection = connection;
         groupHelper = new GroupHelper(connection);
+    }
+
+    public static SID getPrimaryGroupSID(final SID sid, final byte[] pgID) {
+        final SID pgSID = SID.newInstance(sid.getIdentifierAuthority());
+        pgSID.setRevision(sid.getRevision());
+
+        final List<byte[]> subAuthorities = sid.getSubAuthorities();
+
+        if (subAuthorities != null && !subAuthorities.isEmpty()) {
+            for (int i = 0; i < subAuthorities.size() - 1; i++) {
+                pgSID.addSubAuthority(subAuthorities.get(i));
+            }
+        }
+
+        pgSID.addSubAuthority(pgID);
+
+        return pgSID;
+    }
+
+    public javax.naming.directory.Attribute getGroupID(final String dn) throws InvalidNameException {
+        try {
+            final LdapName name = new LdapName(dn);
+            final Attributes group = connection.getInitialContext().getAttributes(name, new String[] { OBJECTSID });
+            final SID gsid = SID.parse((byte[]) group.get(OBJECTSID).get());
+            final byte[] groupID = gsid.getSubAuthorities().get(gsid.getSubAuthorityCount() - 1);
+            return new BasicAttribute(PRIMARYGROUPID, String.valueOf(NumberFacility.getUInt(groupID)));
+        } catch (Exception e) {
+            LOG.error(e, "Invalid group DN '{0}'", dn);
+            throw new ConnectorException(e);
+        }
+    }
+
+    public String getPrimaryGroupDN(final LdapEntry entry, final Attributes profile) throws NamingException {
+
+        final javax.naming.directory.Attribute primaryGroupID = profile.get(PRIMARYGROUPID);
+        final javax.naming.directory.Attribute objectSID = profile.get(OBJECTSID);
+
+        final String pgDN;
+
+        if (primaryGroupID == null || primaryGroupID.get() == null || objectSID == null || objectSID.get() == null) {
+            pgDN = null;
+        } else {
+            final SID groupSID = getPrimaryGroupSID(SID.parse((byte[]) objectSID.get()),
+                    NumberFacility.getUIntBytes(Long.parseLong(primaryGroupID.get().toString())));
+
+            final Set<SearchResult> res = basicLdapSearch(String.format(
+                    "(&(objectclass=group)(%s=%s))", OBJECTSID, Hex.getEscaped(groupSID.toByteArray())),
+                    ((ADConfiguration) connection.getConfiguration()).getGroupBaseContexts());
+
+            if (res == null || res.isEmpty()) {
+                LOG.warn("Error retrieving primary group for {0}", entry.getDN());
+                pgDN = null;
+            } else {
+                pgDN = res.iterator().next().getNameInNamespace();
+                LOG.info("Found primary group {0}", pgDN);
+            }
+        }
+
+        return pgDN;
     }
 
     public Set<String> getAttributesToGet(final String[] attributesToGet, final ObjectClass oclass) {
@@ -108,7 +167,7 @@ public class ADUtilities {
         if (oclass.is(ObjectClass.ACCOUNT_NAME)) {
             // AD specific, for checking wether a user is enabled or not
             result.add(UACCONTROL_ATTR);
-        }
+       }
 
         // Our password is marked as readable because of sync().
         // We really can't return it from basicLdapSearch.
@@ -158,15 +217,9 @@ public class ADUtilities {
 
         final ObjectClassInfo oci = conn.getSchemaMapping().schema().findObjectClassInfo(oclass.getObjectClassValue());
 
-        // some attribs must be removed - ADDS 2012
-        final ArrayList<String> removedAttrs = new ArrayList<String>();
-        removedAttrs.add("msds-memberOfTransitive");
-        removedAttrs.add("msDS-parentdistname");
-        removedAttrs.add("msds-memberTransitive");
-
         if (oci != null) {
             for (AttributeInfo info : oci.getAttributeInfo()) {
-                if (info.isReturnedByDefault() && !removedAttrs.contains(info.getName())) {
+                if (info.isReturnedByDefault() && !ADDS2012_ATTRIBUTES_TO_BE_REMOVED.contains(info.getName())) {
                     result.add(info.getName());
                 }
             }
@@ -221,38 +274,20 @@ public class ADUtilities {
 
         builder.setName(connection.getSchemaMapping().createName(oclass, entry));
 
+        String pgDN = null;
+
         for (String attributeName : attrsToGet) {
 
             Attribute attribute = null;
 
             if (LdapConstants.isLdapGroups(attributeName) || attributeName.equals(ADConnector.MEMBEROF)) {
                 final Set<String> ldapGroups = getGroups(entry.getDN().toString());
-                final javax.naming.directory.Attribute primaryGroupID = profile.get(PRIMARYGROUPID);
-                final javax.naming.directory.Attribute objectSID = profile.get(OBJECTSID);
-
-                if (primaryGroupID != null && primaryGroupID.get() != null
-                        && objectSID != null && objectSID.get() != null) {
-                    final byte[] pgID = NumberFacility.getUIntBytes(Long.parseLong(primaryGroupID.get().toString()));
-                    final SID pgSID = SID.parse((byte[]) objectSID.get());
-                    final SID groupSID = SID.newInstance(pgSID.getIdentifierAuthority());
-                    for (int i = 0; i < pgSID.getSubAuthorityCount() - 1; i++) {
-                        groupSID.addSubAuthority(pgSID.getSubAuthorities().get(i));
-                    }
-                    groupSID.addSubAuthority(pgID);
-
-                    final Set<SearchResult> res = basicLdapSearch(String.format(
-                            "(&(objectclass=group)(%s=%s))", OBJECTSID, Hex.getEscaped(groupSID.toByteArray())),
-                            ((ADConfiguration) connection.getConfiguration()).getGroupBaseContexts());
-
-                    if (res == null || res.isEmpty()) {
-                        LOG.warn("Error retrieving primary group for {0}", entry.getDN());
-                    } else {
-                        final String pgDN = res.iterator().next().getNameInNamespace();
-                        LOG.info("Found primary group {0}", pgDN);
-                        ldapGroups.add(pgDN);
-                    }
+                if (StringUtil.isBlank(pgDN)) {
+                    pgDN = getPrimaryGroupDN(entry, profile);
                 }
-
+                if (StringUtil.isNotBlank(pgDN)) {
+                    ldapGroups.add(pgDN);
+                }
                 attribute = AttributeBuilder.build(attributeName, ldapGroups);
             } else if (LdapConstants.isPosixGroups(attributeName)) {
                 final Set<String> posixRefAttrs = LdapUtil.getStringAttrValues(entry.getAttributes(), GroupHelper.
@@ -295,6 +330,11 @@ public class ADUtilities {
                             UCCP_FLAG,
                             SDDLHelper.isUserCannotChangePassword(new SDDL(((byte[]) sddl.get()))));
                 }
+            } else if (ADConfiguration.PRIMARY_GROUP_DN_NAME.equalsIgnoreCase(attributeName)) {
+                if (StringUtil.isBlank(pgDN)) {
+                    pgDN = getPrimaryGroupDN(entry, profile);
+                }
+                attribute = AttributeBuilder.build(ADConfiguration.PRIMARY_GROUP_DN_NAME, pgDN);
             } else {
                 if (profile.get(attributeName) != null) {
                     attribute = connection.getSchemaMapping().createAttribute(oclass, attributeName, entry, false);
@@ -311,9 +351,8 @@ public class ADUtilities {
     }
 
     /**
-     * Create a DN string starting from a set attributes and a default people
-     * container. This method has to be used if __NAME__ attribute is not
-     * provided or it it is not a DN.
+     * Create a DN string starting from a set attributes and a default people container. This method has to be used if
+     * __NAME__ attribute is not provided or it it is not a DN.
      *
      * @param oclass object class.
      * @param nameAttr naming attribute.

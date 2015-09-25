@@ -15,6 +15,8 @@
  */
 package net.tirasa.connid.bundles.ad.crud;
 
+import static net.tirasa.connid.bundles.ad.ADConnector.OBJECTSID;
+import static net.tirasa.connid.bundles.ad.ADConnector.PRIMARYGROUPID;
 import static org.junit.Assert.*;
 
 import java.util.AbstractMap;
@@ -28,6 +30,7 @@ import java.util.Set;
 import net.tirasa.adsddl.ntsd.SID;
 import net.tirasa.adsddl.ntsd.utils.NumberFacility;
 import net.tirasa.connid.bundles.ad.GroupTest;
+import net.tirasa.connid.bundles.ad.util.ADUtilities;
 import org.identityconnectors.framework.common.objects.Attribute;
 import org.identityconnectors.framework.common.objects.AttributeBuilder;
 import org.identityconnectors.framework.common.objects.AttributeUtil;
@@ -543,7 +546,7 @@ public class GroupCrudTest extends GroupTest {
             // Update PrimaryGroupID
             // -------------------------------------------------
             List<Attribute> attrToReplace = Arrays.asList(new Attribute[] {
-                AttributeBuilder.build("primaryGroupID", String.valueOf(NumberFacility.getUInt(groupID))) });
+                AttributeBuilder.build(PRIMARYGROUPID, String.valueOf(NumberFacility.getUInt(groupID))) });
 
             uuid = connector.update(
                     ObjectClass.ACCOUNT,
@@ -552,17 +555,17 @@ public class GroupCrudTest extends GroupTest {
                     null);
 
             user = connector.getObject(ObjectClass.ACCOUNT, uuid, oob.build());
-            usid = SID.parse((byte[]) user.getAttributeByName("objectSID").getValue().get(0));
+            usid = SID.parse((byte[]) user.getAttributeByName(OBJECTSID).getValue().get(0));
             assertNotNull(usid);
 
-            primaryGID = String.class.cast(user.getAttributeByName("primaryGroupID").getValue().get(0));
+            primaryGID = String.class.cast(user.getAttributeByName(PRIMARYGROUPID).getValue().get(0));
             assertNotNull(primaryGID);
 
-            usid.getSubAuthorities().remove(usid.getSubAuthorityCount() - 1);
-            usid.addSubAuthority(NumberFacility.getUIntBytes(Integer.parseInt(primaryGID)));
+            final SID groupSID = ADUtilities.getPrimaryGroupSID(usid,
+                    NumberFacility.getUIntBytes(Integer.parseInt(primaryGID)));
 
             connector.search(ObjectClass.GROUP,
-                    FilterBuilder.equalTo(AttributeBuilder.build("objectSID", usid.toByteArray())),
+                    FilterBuilder.equalTo(AttributeBuilder.build(OBJECTSID, groupSID.toByteArray())),
                     handler,
                     oob.build());
             assertEquals(group.getName(), results.get(0).getName());

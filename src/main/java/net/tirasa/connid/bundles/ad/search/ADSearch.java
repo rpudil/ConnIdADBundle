@@ -1,17 +1,17 @@
 /**
  * Copyright (C) 2011 ConnId (connid-dev@googlegroups.com)
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not
- * use this file except in compliance with the License. You may obtain a copy of
- * the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *         http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations under
- * the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package net.tirasa.connid.bundles.ad.search;
 
@@ -21,12 +21,15 @@ import static org.identityconnectors.common.StringUtil.isBlank;
 import com.sun.jndi.ldap.ctl.VirtualListViewControl;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
+import javax.naming.InvalidNameException;
 import javax.naming.NamingException;
 import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
+import javax.naming.ldap.LdapName;
 import javax.naming.ldap.PagedResultsControl;
 import net.tirasa.adsddl.ntsd.utils.GUID;
 import net.tirasa.adsddl.ntsd.utils.Hex;
@@ -50,12 +53,19 @@ import org.identityconnectors.framework.common.objects.ResultsHandler;
 public class ADSearch {
 
     private final LdapConnection conn;
+
     private final ObjectClass oclass;
+
     private final LdapFilter filter;
+
     private final OperationOptions options;
+
     private final String[] baseDNs;
+
     private final ADUtilities utils;
+
     private static final Log LOG = Log.getLog(ADSearch.class);
+
     private final static Pattern oguidp = Pattern.compile(
             "objectGUID=([a-z0-9]{8,8}+-[a-z0-9]{4,4}+-[a-z0-9]{4,4}+-[a-z0-9]{4,4}+-[a-z0-9]{12,12}+)");
 
@@ -93,6 +103,7 @@ public class ADSearch {
         final LdapInternalSearch search = getInternalSearch(attrsToGet);
 
         search.execute(new SearchResultsHandler() {
+
             @Override
             public boolean handle(final String baseDN, final SearchResult result)
                     throws NamingException {
@@ -118,23 +129,24 @@ public class ADSearch {
         // matching the native filter.
 
         LdapSearchStrategy strategy;
-        List<String> dns = new ArrayList();
+        List<String> dns;
         int searchScope;
 
-        final String filterEntryDN = filter != null ? filter.getEntryDN() : null;
+        final String filterEntryDN = filter == null ? null : filter.getEntryDN();
         if (filterEntryDN != null) {
             // Would be good to check that filterEntryDN is under the configured 
             // base contexts. However, the adapter is likely to pass entries
             // outside the base contexts, so not checking in order to be on the
             // safe side.
             strategy = new ADDefaultSearchStrategy(true);
-            for (String dn : getBaseDNs()) {
-                if (filterEntryDN.contains("=")) {
-                    dns.add(filterEntryDN + "," + dn);
-                } else {
-                    dns.add("CN=" + filterEntryDN + "," + dn);
-                }
+
+            try {
+                dns = buildBaseContextFilter(filterEntryDN);
+            } catch (InvalidNameException e) {
+                LOG.error(e, "Error building entry DN filter starting from '{0}'", filterEntryDN);
+                dns = getBaseDNs();
             }
+
             searchScope = SearchControls.OBJECT_SCOPE;
         } else {
             strategy = getSearchStrategy();
@@ -182,6 +194,37 @@ public class ADSearch {
                 dns,
                 strategy,
                 controls);
+    }
+
+    /**
+     * Accept DNs filter provided by CN only or prefix only or full DN.
+     *
+     * @param filterEntryDN provided entry DN filter.
+     * @return base context filter.
+     */
+    private List<String> buildBaseContextFilter(final String filterEntryDN) throws InvalidNameException {
+        final List<String> res = new ArrayList<String>();
+
+        LdapName prefix = null;
+
+        try {
+            prefix = new LdapName(filterEntryDN);
+        } catch (InvalidNameException ine) {
+            LOG.info(ine, "'{0}' is not am entry DN. Let's try derive it", filterEntryDN);
+            prefix = new LdapName(String.format("CN=%s", filterEntryDN));
+        }
+
+        for (String dn : getBaseDNs()) {
+            final LdapName suffix = new LdapName(dn);
+
+            if (prefix.startsWith(suffix)) {
+                return Collections.singletonList(prefix.toString());
+            }
+
+            res.add(suffix.addAll(prefix).toString());
+        }
+
+        return res;
     }
 
     private String getSearchFilter(final String... optionalFilters) {

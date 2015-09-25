@@ -18,7 +18,6 @@ package net.tirasa.connid.bundles.ad.sync;
 import static net.tirasa.connid.bundles.ad.ADConnector.OBJECTGUID;
 
 import com.sun.jndi.ldap.ctl.DirSyncResponseControl;
-import java.io.IOException;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.NoSuchElementException;
@@ -31,13 +30,13 @@ import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
 import javax.naming.ldap.Control;
 import javax.naming.ldap.LdapContext;
-import net.tirasa.adsddl.ntsd.data.SDFlagsControl;
+import net.tirasa.adsddl.ntsd.controls.SDFlagsControl;
+import net.tirasa.adsddl.ntsd.controls.DirSyncControl;
 import net.tirasa.adsddl.ntsd.utils.GUID;
 import net.tirasa.connid.bundles.ad.ADConfiguration;
 import net.tirasa.connid.bundles.ad.ADConnection;
 import net.tirasa.connid.bundles.ad.util.ADUtilities;
 import net.tirasa.connid.bundles.ad.util.DeletedControl;
-import net.tirasa.connid.bundles.ad.util.DirSyncControl;
 import net.tirasa.connid.bundles.ad.util.DirSyncUtils;
 import net.tirasa.connid.bundles.ldap.search.LdapInternalSearch;
 import org.identityconnectors.common.StringUtil;
@@ -53,14 +52,16 @@ import org.identityconnectors.framework.common.objects.SyncToken;
 import org.identityconnectors.framework.common.objects.Uid;
 
 /**
- * An implementation of the sync operation based on the DirSync protocol, for
- * Active Directory.
+ * An implementation of the sync operation based on the DirSync protocol, for Active Directory.
  */
 public class ADSyncStrategy {
 
     private static final Log LOG = Log.getLog(ADSyncStrategy.class);
+
     private final transient ADConnection conn;
+
     private transient SyncToken latestSyncToken;
+
     private final ADUtilities utils;
 
     public ADSyncStrategy(final ADConnection conn) {
@@ -149,7 +150,7 @@ public class ADSyncStrategy {
                     LOG.ok("Synchronization with empty token.");
                 }
 
-                ctx = conn.getSyncContext(new Control[]{new DirSyncControl()});
+                ctx = conn.getSyncContext(new Control[] { new DirSyncControl() });
 
                 if (((ADConfiguration) conn.getConfiguration()).isStartSyncFromToday()) {
                     search(ctx, "(cn=__CONNID-NORES__)", searchCtls, true);
@@ -161,7 +162,7 @@ public class ADSyncStrategy {
                     LOG.ok("Synchronization with token.");
                 }
 
-                ctx = conn.getSyncContext(new Control[]{new DirSyncControl((byte[]) token.getValue())});
+                ctx = conn.getSyncContext(new Control[] { new DirSyncControl((byte[]) token.getValue()) });
             }
         } catch (Exception e) {
             throw new ConnectorException("Could not set DirSync request controls", e);
@@ -223,7 +224,7 @@ public class ADSyncStrategy {
         final String filter = "(CN=__CONNID-NORES__)";
 
         try {
-            final LdapContext ctx = conn.getSyncContext(new Control[]{new DirSyncControl()});
+            final LdapContext ctx = conn.getSyncContext(new Control[] { new DirSyncControl() });
             ctx.search(baseContextDn, filter, searchCtls);
 
             final Control[] rspCtls = ctx.getResponseControls();
@@ -260,7 +261,7 @@ public class ADSyncStrategy {
             throw new ConnectorException("Invalid context or search result.");
         }
 
-        ctx.setRequestControls(new Control[]{new DeletedControl(), new SDFlagsControl(0x00000004)});
+        ctx.setRequestControls(new Control[] { new DeletedControl(), new SDFlagsControl(0x00000004) });
 
         // Just used to retrieve object classes and to pass to getSyncDelta
         Attributes profile = result.getAttributes();
@@ -394,7 +395,7 @@ public class ADSyncStrategy {
             throw new ConnectorException("Invalid context or search result.");
         }
 
-        ctx.setRequestControls(new Control[]{new DeletedControl()});
+        ctx.setRequestControls(new Control[] { new DeletedControl() });
 
         // Just used to retrieve object classes and to pass to getSyncDelta
         Attributes profile = sr.getAttributes();
@@ -414,7 +415,7 @@ public class ADSyncStrategy {
             isDeleted = attributeIsDeleted != null
                     && attributeIsDeleted.get() != null
                     && Boolean.parseBoolean(
-                    attributeIsDeleted.get().toString());
+                            attributeIsDeleted.get().toString());
 
         } catch (NoSuchElementException e) {
             if (LOG.isOk()) {

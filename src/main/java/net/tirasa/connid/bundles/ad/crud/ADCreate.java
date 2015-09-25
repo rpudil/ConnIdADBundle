@@ -114,6 +114,8 @@ public class ADCreate extends LdapModifyOperation {
 
         List<String> ldapGroups = null;
 
+        String primaryGroupDN = null;
+
         ADGuardedPasswordAttribute pwdAttr = null;
 
         final BasicAttributes adAttrs = new BasicAttributes(true);
@@ -131,6 +133,9 @@ public class ADCreate extends LdapModifyOperation {
                 if (value != null && !value.isEmpty()) {
                     uccp = (Boolean) value.get(0);
                 }
+            } else if (attr.is(ADConfiguration.PRIMARY_GROUP_DN_NAME)) {
+                final List<Object> value = attr.getValue();
+                primaryGroupDN = value == null || value.isEmpty() ? null : String.class.cast(value.get(0));
             } else if (attr.is(ADConfiguration.PROMPT_USER_FLAG)) {
                 final List<Object> value = attr.getValue();
                 if (value != null && !value.isEmpty() && (Boolean) value.get(0)) {
@@ -218,6 +223,16 @@ public class ADCreate extends LdapModifyOperation {
 
         if (!isEmpty(ldapGroups)) {
             groupHelper.addLdapGroupMemberships(entryDN, ldapGroups);
+        }
+
+        if (StringUtil.isNotBlank(primaryGroupDN)) {
+            // ---------------------------------
+            // Change primaryGroupID
+            // ---------------------------------
+            conn.getInitialContext().modifyAttributes(entryDN, new ModificationItem[] {
+                new ModificationItem(DirContext.REPLACE_ATTRIBUTE, utils.getGroupID(primaryGroupDN)) });
+
+            // ---------------------------------
         }
 
         if (OBJECTGUID.equals(conn.getSchemaMapping().getLdapUidAttribute(oclass))) {

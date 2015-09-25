@@ -1,17 +1,17 @@
 /**
  * Copyright (C) 2011 ConnId (connid-dev@googlegroups.com)
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
  *
- *         http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
  */
 package net.tirasa.connid.bundles.ad.schema;
 
@@ -39,6 +39,7 @@ import org.identityconnectors.framework.common.objects.AttributeInfoBuilder;
 import org.identityconnectors.framework.common.objects.ObjectClass;
 import org.identityconnectors.framework.common.objects.ObjectClassInfo;
 import org.identityconnectors.framework.common.objects.ObjectClassInfoBuilder;
+import org.identityconnectors.framework.common.objects.OperationalAttributes;
 import org.identityconnectors.framework.common.objects.Schema;
 import org.identityconnectors.framework.common.objects.SchemaBuilder;
 
@@ -54,7 +55,7 @@ class ADSchemaBuilder {
         "maycontain",
         "systemmaycontain",
         "mustcontain",
-        "systemmustcontain" };
+        "systemmustcontain"};
 
     public ADSchemaBuilder(final ADConnection connection) {
         this.connection = connection;
@@ -128,6 +129,7 @@ class ADSchemaBuilder {
         schemaNames.remove(ADConnector.SDDL_ATTR);
         schemaNames.remove(ADConfiguration.LOCK_OUT_FLAG);
         schemaNames.remove(ADConfiguration.PROMPT_USER_FLAG);
+        schemaNames.remove(ADConfiguration.PRIMARY_GROUP_DN_NAME);
 
         final ObjectClassInfoBuilder objClassBld = new ObjectClassInfoBuilder();
 
@@ -136,9 +138,14 @@ class ADSchemaBuilder {
         objClassBld.setContainer(false);
         objClassBld.addAllAttributeInfo(createAttrInfos(schemaNames));
 
+        if (oname.equalsIgnoreCase(ObjectClass.ACCOUNT_NAME)) {
+            objClassBld.addAttributeInfo(AttributeInfoBuilder.build(OperationalAttributes.ENABLE_NAME, String.class));
+        }
+
         objClassBld.addAttributeInfo(AttributeInfoBuilder.build(ADConfiguration.UCCP_FLAG, Boolean.class));
         objClassBld.addAttributeInfo(AttributeInfoBuilder.build(ADConfiguration.LOCK_OUT_FLAG, Boolean.class));
         objClassBld.addAttributeInfo(AttributeInfoBuilder.build(ADConfiguration.PROMPT_USER_FLAG, Boolean.class));
+        objClassBld.addAttributeInfo(AttributeInfoBuilder.build(ADConfiguration.PRIMARY_GROUP_DN_NAME, String.class));
 
         final ObjectClassInfo oci = objClassBld.build();
         schemaBld.defineObjectClass(oci);
@@ -198,7 +205,7 @@ class ADSchemaBuilder {
         // ------------------------------
         final SearchControls searchCtls = LdapInternalSearch.createDefaultSearchControls();
         searchCtls.setSearchScope(SearchControls.SUBTREE_SCOPE);
-        searchCtls.setReturningAttributes(new String[] { IS_SINGLE_VALUE, SYSTEM_ONLY });
+        searchCtls.setReturningAttributes(new String[]{IS_SINGLE_VALUE, SYSTEM_ONLY});
         // ------------------------------
 
         int i = 0;
